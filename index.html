@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="mn">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MindMatch — Санамсаргүй 1:1 Чат</title>
+  <style>
+    :root {
+      --bg: #0f0f13;
+      --card: #181820;
+      --muted: #262632;
+      --accent: #6c5ce7;
+      --accent-hover: #5b4bc4;
+      --danger: #d63031;
+      --text: #f1f1f5;
+      --sub: #9ea0b0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+    }
+    #app {
+      width: 100%;
+      max-width: 480px;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      padding: 12px;
+    }
+    button, select, input {
+      font: inherit;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      outline: none;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background .15s;
+    }
+    button:hover:not(:disabled) { background: var(--accent-hover); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button.s { background: var(--muted); color: var(--text); font-weight: 500; }
+    button.s:hover:not(:disabled) { background: #323242; }
+    button.d { background: rgba(214, 48, 49, .18); color: #ff7675; border-color: rgba(214, 48, 49, .35); }
+    select, input {
+      background: var(--card);
+      color: var(--text);
+      border-color: #2e2e3d;
+    }
+    .row { display: flex; gap: 6px; align-items: center; }
+    .hide { display: none !important; }
+
+    /* Gate */
+    #gate {
+      margin: auto 0;
+      background: var(--card);
+      padding: 20px;
+      border-radius: 16px;
+      border: 1px solid #262635;
+    }
+    #gate h2 { margin: 0 0 8px; }
+    .sub { color: var(--sub); font-size: 14px; line-height: 1.5; }
+    .field { margin: 14px 0; }
+    label.chk { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; cursor: pointer; }
+    label.chk input { margin-top: 3px; }
+
+    /* Main */
+    #main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .topbar {
+      background: var(--card);
+      padding: 8px 12px;
+      border-radius: 12px;
+      font-size: 13px;
+      justify-content: space-between;
+    }
+    .badge {
+      background: rgba(108, 92, 231, .2);
+      color: #a29bfe;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    #log {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 10px 0;
+      padding: 4px;
+    }
+    .m {
+      padding: 9px 13px;
+      border-radius: 14px;
+      max-width: 82%;
+      word-break: break-word;
+      line-height: 1.45;
+      font-size: 15px;
+    }
+    .me { background: var(--accent); align-self: flex-end; border-bottom-right-radius: 4px; }
+    .th { background: var(--card); border: 1px solid #292938; align-self: flex-start; border-bottom-left-radius: 4px; }
+    .sys {
+      color: var(--sub);
+      align-self: center;
+      font-size: 13px;
+      text-align: center;
+      background: rgba(255,255,255,.03);
+      padding: 5px 10px;
+      border-radius: 999px;
+    }
+    #typing { color: var(--sub); font-size: 12px; min-height: 18px; padding-left: 4px; }
+    #txt { flex: 1; }
+
+    /* Plans Modal */
+    #plist {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 10, 14, .96);
+      padding: 16px;
+      overflow-y: auto;
+      max-width: 480px;
+      margin: auto;
+      z-index: 20;
+    }
+    .plan-btn {
+      width: 100%;
+      margin: 4px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #pay { margin-top: 12px; text-align: center; }
+    #pay img { width: 220px; max-width: 100%; background: #fff; padding: 8px; border-radius: 12px; }
+    .bank-link {
+      display: block;
+      background: var(--card);
+      color: #a29bfe;
+      text-decoration: none;
+      padding: 10px;
+      border-radius: 10px;
+      margin: 6px 0;
+      border: 1px solid #2e2e3d;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="gate">
+      <h2>MindMatch</h2>
+      <p class="sub">Бүртгэлгүй, аноним 1:1 чат. Санамсаргүй хайлт үнэгүй, хүйсээр шүүх нь багцтай.</p>
+
+      <div class="field">
+        <label class="chk">
+          <input type="checkbox" id="adult">
+          <span>Би 18 ба түүнээс дээш настай бөгөөд <a href="/terms.html" target="_blank" style="color:#a29bfe">үйлчилгээний нөхцөл, нууцлалын бодлогыг</a> зөвшөөрч байна.</span>
+        </label>
+      </div>
+
+      <div class="field">
+        <div class="sub" style="margin-bottom:6px">Таны хүйс (заавал биш):</div>
+        <select id="g" style="width:100%">
+          <option value="">Хэлэхгүй</option>
+          <option value="m">Эрэгтэй</option>
+          <option value="f">Эмэгтэй</option>
+        </select>
+      </div>
+
+      <button id="go" style="width:100%">Чат руу орох</button>
+      <p id="err" style="color:#ff7675;font-size:13px;margin:10px 0 0"></p>
+    </div>
+
+    <div id="main" class="hide">
+      <div class="row topbar">
+        <span id="stat">Бэлэн</span>
+        <div class="row">
+          <span id="premBadge" class="badge hide">VIP</span>
+          <span id="online" class="sub">Онлайн: 1</span>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:8px">
+        <select id="want" style="flex:1">
+          <option value="">Санамсаргүй (үнэгүй)</option>
+          <option value="f">Эмэгтэй (багцтай)</option>
+          <option value="m">Эрэгтэй (багцтай)</option>
+        </select>
+        <button id="find">Хайх</button>
+        <button class="s hide" id="cancel">Болих</button>
+        <button class="s" id="plans">Багц</button>
+      </div>
+
+      <div id="log">
+        <div class="sys">«Хайх» товч дарж шинэ яриа эхлүүлнэ үү.</div>
+      </div>
+
+      <div id="typing"></div>
+
+      <div class="row hide" id="tools" style="margin-bottom:6px">
+        <button class="s" id="next" style="flex:1">Дараагийн</button>
+        <button class="s" id="leave">Гарах</button>
+        <button class="d" id="block">Блок</button>
+        <button class="d" id="report">Report</button>
+      </div>
+
+      <div class="row">
+        <input id="txt" maxlength="500" placeholder="Мессеж бичих..." disabled>
+        <button id="send" disabled>➤</button>
+      </div>
+    </div>
+
+    <div id="plist" class="hide"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const s = io();
+    let premium = false;
+    let premUntil = 0;
+    let typingTimer = null;
+    let payPoll = null;
+    let reportedCurrent = false;
+
+    const addMsg = (text, cls) => {
+      const d = document.createElement('div');
+      d.className = 'm ' + cls;
+      d.textContent = text;
+      $('log').append(d);
+      $('log').scrollTop = $('log').scrollHeight;
+    };
+
+    const updatePremUI = () => {
+      if (premium && premUntil > Date.now()) {
+        const dt = new Date(premUntil);
+        $('premBadge').classList.remove('hide');
+        $('premBadge').title = 'Хүчинтэй хугацаа: ' + dt.toLocaleString('mn-MN');
+      } else {
+        premium = false;
+        $('premBadge').classList.add('hide');
+      }
+    };
+
+    const setChatActive = active => {
+      $('txt').disabled = !active;
+      $('send').disabled = !active;
+      $('tools').classList.toggle('hide', !active);
+      if (active) {
+        reportedCurrent = false;
+        $('txt').focus();
+      } else {
+        $('typing').textContent = '';
+      }
+    };
+
+    const setSearching = searching => {
+      $('find').classList.toggle('hide', searching);
+      $('cancel').classList.toggle('hide', !searching);
+      $('want').disabled = searching;
+    };
+
+    $('go').onclick = () => {
+      $('err').textContent = '';
+      s.emit('hello', {
+        token: localStorage.tk,
+        gender: $('g').value,
+        adult: $('adult').checked
+      }, res => {
+        if (!res || res.err) {
+          $('err').textContent = (res && res.err) || 'Холбогдож чадсангүй.';
+          return;
+        }
+        localStorage.tk = res.token;
+        premium = Boolean(res.premium);
+        premUntil = res.until || 0;
+        updatePremUI();
+        $('gate').classList.add('hide');
+        $('main').classList.remove('hide');
+      });
+    };
+
+    const startSearch = () => {
+      const want = $('want').value;
+      if (want && (!premium || premUntil <= Date.now())) {
+        openPlans();
+        return;
+      }
+      $('log').innerHTML = '';
+      setChatActive(false);
+      setSearching(true);
+      s.emit('find', want);
+    };
+
+    $('find').onclick = startSearch;
+    $('next').onclick = startSearch;
+    $('cancel').onclick = () => s.emit('cancel_find');
+    $('leave').onclick = () => s.emit('leave');
+
+    s.on('waiting', () => {
+      $('stat').textContent = 'Хүн хайж байна...';
+      addMsg('Тохирох харилцагч хайж байна...', 'sys');
+    });
+
+    s.on('search_cancelled', () => {
+      setSearching(false);
+      $('stat').textContent = 'Хайлт зогссон';
+      addMsg('Хайлтыг зогсоолоо.', 'sys');
+    });
+
+    s.on('matched', () => {
+      setSearching(false);
+      $('stat').textContent = 'Холбогдлоо';
+      $('log').innerHTML = '';
+      addMsg('Харилцагчтай холбогдлоо. Сайн уу гэж мэндлээрэй 👋', 'sys');
+      setChatActive(true);
+    });
+
+    s.on('left_chat', () => {
+      setSearching(false);
+      setChatActive(false);
+      $('stat').textContent = 'Яриа дууссан';
+      addMsg('Та ярианаас гарлаа.', 'sys');
+    });
+
+    s.on('partner_left', () => {
+      setSearching(false);
+      setChatActive(false);
+      $('stat').textContent = 'Харилцагч гарлаа';
+      addMsg('Харилцагч ярианаас гарлаа.', 'sys');
+    });
+
+    s.on('need_premium', () => {
+      setSearching(false);
+      premium = false;
+      updatePremUI();
+      openPlans();
+    });
+
+    s.on('err_msg', msg => {
+      setSearching(false);
+      setChatActive(false);
+      addMsg(msg, 'sys');
+    });
+
+    s.on('session_replaced', () => {
+      setSearching(false);
+      setChatActive(false);
+      $('stat').textContent = 'Өөр цонхноос нэвтэрсэн';
+      addMsg('Таны эрх өөр цонх эсвэл төхөөрөмж дээр нээгдсэн тул энэ холболт хаагдлаа.', 'sys');
+    });
+
+    s.on('msg', text => {
+      addMsg(text, 'th');
+      $('typing').textContent = '';
+    });
+
+    s.on('typing', () => {
+      $('typing').textContent = 'Харилцагч бичиж байна...';
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => { $('typing').textContent = ''; }, 2500);
+    });
+
+    s.on('online', count => {
+      $('online').textContent = 'Онлайн: ' + count;
+    });
+
+    const sendMsg = () => {
+      const text = $('txt').value.trim();
+      if (!text) return;
+      s.emit('msg', text);
+      addMsg(text, 'me');
+      $('txt').value = '';
+    };
+
+    $('send').onclick = sendMsg;
+    $('txt').onkeydown = e => {
+      if (e.key === 'Enter') sendMsg();
+    };
+    $('txt').oninput = () => s.emit('typing');
+
+    $('block').onclick = () => {
+      if (!confirm('Энэ хэрэглэгчийг блоклох уу? Дахин таарахгүй.')) return;
+      s.emit('block');
+      addMsg('Хэрэглэгчийг блоклолоо.', 'sys');
+    };
+
+    $('report').onclick = () => {
+      if (reportedCurrent) {
+        addMsg('Та энэ харилцагчийг аль хэдийн report хийсэн байна.', 'sys');
+        return;
+      }
+      const reason = prompt('Зөрчлийн шалтгаан бичнэ үү (жишээ нь: доромжлол, спам):');
+      if (reason === null) return;
+      s.emit('report', reason);
+      reportedCurrent = true;
+      addMsg('Report илгээгдлээ. Баярлалаа.', 'sys');
+    };
+
+    async function openPlans() {
+      clearInterval(payPoll);
+      const box = $('plist');
+      box.classList.remove('hide');
+      box.innerHTML = '<p class="sub">Багцын мэдээлэл ачаалж байна...</p>';
+
+      try {
+        const plans = await (await fetch('/plans')).json();
+        box.innerHTML =
+          '<h3 style="margin-top:0">VIP Багц сонгох</h3>' +
+          '<p class="sub">Хүйсээр шүүж хайх эрх сонгосон хугацаанд нээгдэнэ.</p>' +
+          Object.entries(plans).map(([k, info]) =>
+            `<button class="s plan-btn" data-k="${k}"><span>${info.label}</span><strong>${info.price.toLocaleString()}₮</strong></button>`
+          ).join('') +
+          '<button id="pc" style="width:100%;margin-top:10px">Хаах</button>' +
+          '<div id="pay"></div>';
+
+        $('pc').onclick = () => {
+          clearInterval(payPoll);
+          box.classList.add('hide');
+        };
+
+        box.querySelectorAll('[data-k]').forEach(btn => {
+          btn.onclick = async () => {
+            clearInterval(payPoll);
+            $('pay').innerHTML = '<p class="sub">QPay нэхэмжлэх үүсгэж байна...</p>';
+            const res = await fetch('/pay/invoice', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: localStorage.tk, plan: btn.dataset.k })
+            });
+            const r = await res.json();
+            if (!res.ok || !r.sid) {
+              $('pay').innerHTML = `<p style="color:#ff7675">${r.err || 'Нэхэмжлэх үүсгэж чадсангүй'}</p>`;
+              return;
+            }
+
+            const bankLinks = (r.urls || []).map(u =>
+              `<a class="bank-link" href="${encodeURI(u.link)}">${u.name}</a>`
+            ).join('');
+
+            $('pay').innerHTML =
+              (r.qr ? `<img src="data:image/png;base64,${r.qr}" alt="QPay QR">` : '') +
+              '<p class="sub">Банкны апп-аар QR уншуулах эсвэл доорх холбоосоор төлнө үү:</p>' +
+              bankLinks;
+
+            payPoll = setInterval(async () => {
+              try {
+                const st = await (await fetch('/pay/status?sid=' + encodeURIComponent(r.sid))).json();
+                if (st.paid) {
+                  clearInterval(payPoll);
+                  premium = true;
+                  premUntil = st.until || (Date.now() + 86400000);
+                  updatePremUI();
+                  $('pay').innerHTML = '<p style="color:#55efc4;font-weight:600">Төлбөр амжилттай баталгаажлаа! ✅</p>';
+                }
+              } catch {}
+            }, 3000);
+          };
+        });
+      } catch {
+        box.innerHTML = '<p style="color:#ff7675">Багц ачаалахад алдаа гарлаа.</p><button id="pc" style="width:100%">Хаах</button>';
+        $('pc').onclick = () => box.classList.add('hide');
+      }
+    }
+
+    $('plans').onclick = openPlans;
+  </script>
+</body>
+</html>
