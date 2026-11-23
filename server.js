@@ -1,3 +1,4 @@
+// MindMatch - Production-ready 1-to-1 anonymous chat server
 const express = require('express');
 const http = require('http');
 const fs = require('fs');
@@ -20,18 +21,19 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_KEY = process.env.ADMIN_KEY || '';
+const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const DB_FILE = path.join(__dirname, 'db.json');
 const DB_TMP = path.join(__dirname, 'db.json.tmp');
 const REPORTS_LOG = path.join(__dirname, 'reports.log');
 
-// Энд өөрийн дансуудын IBAN дугаарыг ард ардаас нь нэмж оруулна
-const PAY_ACCOUNTS = [
-  { id: 'acc1', bank: 'Данс 1', holder: 'Б. Мишээл', iban: 'MN58000500 5325110588' }
-];
+if (!ADMIN_KEY) {
+  console.warn('[WARN] ADMIN_KEY тохируулаагүй байна. Админ API-ууд идэвхгүй байна.');
+}
 
 const PLANS = {
   d1: { days: 1, price: 1990, label: '1 өдөр' },
   d3: { days: 3, price: 3990, label: '3 өдөр' },
+  d5: { days: 5, price: 5490, label: '5 өдөр' },
   d7: { days: 7, price: 6990, label: '7 өдөр' },
   m1: { days: 30, price: 14900, label: '1 сар' },
   m3: { days: 90, price: 34900, label: '3 сар' },
@@ -60,16 +62,24 @@ function saveDbAtomic() {
     if (err) {
       dirty = true;
       saving = false;
+      console.error('[DB] Түр файл бичихэд алдаа:', err.message);
       return;
     }
     fs.rename(DB_TMP, DB_FILE, renameErr => {
       saving = false;
-      if (renameErr) dirty = true;
+      if (renameErr) {
+        dirty = true;
+        console.error('[DB] db.json шинэчлэхэд алдаа:', renameErr.message);
+      }
     });
   });
 }
 setInterval(saveDbAtomic, 3000);
 process.on('SIGINT', () => {
+  if (dirty) fs.writeFileSync(DB_FILE, JSON.stringify(db), 'utf8');
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
   if (dirty) fs.writeFileSync(DB_FILE, JSON.stringify(db), 'utf8');
   process.exit(0);
 });
@@ -95,36 +105,13 @@ function checkAdmin(req, res, next) {
   const provided = req.headers['x-admin-key'] || (req.body && req.body.key) || req.query.key || '';
   const a = Buffer.from(String(provided));
   const b = Buffer.from(String(ADMIN_KEY));
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.sendStatus(403);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return res.sendStatus(403);
+  }
   next();
 }
 
-app.get('/health', (_, res) => {
-  res.json({ ok: true, online: io.engine.clientsCount });
-});
-
-app.get('/admin/orders', checkAdmin, (_, res) => {
-  const list = Object.entries(db.orders)
-    .map(([sid, o]) => ({ sid, ...o }))
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  res.json({ orders: list });
-});
-
-app.post('/admin/approve', checkAdmin, (req, res) => {
-  const sid = req.body && req.body.sid;
-  const order = sid && db.orders[sid];
-  if (!order) return res.status(404).json({ err: 'Захиалга олдсонгүй' });
-  if (!order.done) {
-    order.done = true;
-    order.status = 'paid';
-    order.paidAt = Date.now();
-    activatePlan(order.token, order.plan);
-    saveDbAtomic();
-  }
-  const u = getUser(order.token);
-  res.json({ ok: true, until: u ? u.until : 0 });
-});
-
+// Admin endpoints
 app.post('/admin/activate', checkAdmin, (req, res) => {
   const { token, plan } = req.body || {};
   res.json({ ok: activatePlan(token, plan) });
@@ -154,69 +141,145 @@ app.post('/admin/unban', checkAdmin, (req, res) => {
 
 app.get('/plans', (_, res) => res.json(PLANS));
 
-app.post('/pay/request', (req, res) => {
-  const { token, plan, accountId } = req.body || {};
-  const u = getUser(token);
-  const p = PLANS[plan];
-  if (!u || !p) return res.status(400).json({ err: 'Хүсэлт буруу байна' });
-  if (isBanned(u)) return res.status(403).json({ err: 'Таны хандалт хаагдсан байна' });
+// ---- QPay v2 Integration ----
+const QP = {
+  base: process.env.QPAY_URL || 'https://merchant.qpay.mn/v2',
+  user: process.env.QPAY_USER || '',
+  pass: process.env.QPAY_PASS || '',
+  code: process.env.QPAY_INVOICE_CODE || '',
+  cb: PUBLIC_URL
+};
+let qtok = { v: null, exp: 0 };
 
-  const acc = PAY_ACCOUNTS.find(a => a.id === accountId) || PAY_ACCOUNTS[0];
-  const sid = 'MM' + crypto.randomInt(100000, 999999);
-
-  db.orders[sid] = {
-    token,
-    plan,
-    label: p.label,
-    amount: p.price,
-    accountId: acc.id,
-    iban: acc.iban,
-    status: 'pending',
-    done: false,
-    createdAt: Date.now()
-  };
-  dirty = true;
-
-  res.json({
-    sid,
-    amount: p.price,
-    label: p.label,
-    accounts: PAY_ACCOUNTS,
-    selectedAccount: acc
+async function qpay(endpoint, body) {
+  if (!QP.user || !QP.pass || !QP.code) {
+    throw new Error('QPay тохиргоо дутуу байна');
+  }
+  if (!qtok.v || Date.now() > qtok.exp) {
+    const authRes = await fetch(QP.base + '/auth/token', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Basic ' + Buffer.from(`${QP.user}:${QP.pass}`).toString('base64')
+      }
+    });
+    const authData = await authRes.json();
+    if (!authRes.ok || !authData.access_token) {
+      throw new Error('QPay нэвтрэлт амжилтгүй боллоо');
+    }
+    qtok = {
+      v: authData.access_token,
+      exp: Date.now() + Math.max(60, (authData.expires_in || 1200) - 60) * 1000
+    };
+  }
+  const r = await fetch(QP.base + endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + qtok.v,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
   });
+  return r.json();
+}
+
+const invoiceCooldown = new Map();
+app.post('/pay/invoice', async (req, res) => {
+  try {
+    const { token, plan } = req.body || {};
+    const u = getUser(token);
+    const p = PLANS[plan];
+    if (!u || !p) return res.status(400).json({ err: 'Хүсэлт буруу байна' });
+    if (isBanned(u)) return res.status(403).json({ err: 'Таны хандалт хаагдсан байна' });
+
+    const now = Date.now();
+    if (now - (invoiceCooldown.get(token) || 0) < 3000) {
+      return res.status(429).json({ err: 'Түр хүлээгээд дахин оролдоно уу' });
+    }
+    invoiceCooldown.set(token, now);
+
+    const sid = crypto.randomUUID().replace(/-/g, '');
+    const callbackUrl = QP.cb ? `${QP.cb}/qpay/callback?sid=${sid}` : undefined;
+    const inv = await qpay('/invoice', {
+      invoice_code: QP.code,
+      sender_invoice_no: sid,
+      invoice_receiver_code: 'terminal',
+      invoice_description: `MindMatch ${p.label}`,
+      amount: p.price,
+      ...(callbackUrl ? { callback_url: callbackUrl } : {})
+    });
+
+    if (!inv || !inv.invoice_id) {
+      return res.status(502).json({ err: 'QPay нэхэмжлэх үүсгэхэд алдаа гарлаа' });
+    }
+
+    db.orders[sid] = {
+      token,
+      plan,
+      amount: p.price,
+      inv: inv.invoice_id,
+      done: false,
+      createdAt: now
+    };
+    dirty = true;
+    res.json({ sid, qr: inv.qr_image, urls: inv.urls || [] });
+  } catch (e) {
+    res.status(500).json({ err: e.message || 'Серверийн алдаа' });
+  }
 });
 
-app.post('/pay/submitted', (req, res) => {
-  const { sid } = req.body || {};
-  const order = typeof sid === 'string' && db.orders[sid];
-  if (!order) return res.status(404).json({ err: 'Захиалга олдсонгүй' });
-  if (!order.done && order.status === 'pending') {
-    order.status = 'submitted';
-    order.submittedAt = Date.now();
+async function settleOrder(sid) {
+  if (typeof sid !== 'string' || !db.orders[sid]) return false;
+  const order = db.orders[sid];
+  if (order.done) return true;
+
+  const r = await qpay('/payment/check', {
+    object_type: 'INVOICE',
+    object_id: order.inv,
+    offset: { page_number: 1, page_size: 100 }
+  });
+
+  const paidRow = (r.rows || []).find(
+    x => x.payment_status === 'PAID' && Number(x.payment_amount || order.amount) >= order.amount
+  );
+
+  if (paidRow && !order.done) {
+    order.done = true;
+    order.paidAt = Date.now();
+    activatePlan(order.token, order.plan);
     dirty = true;
   }
-  res.json({ ok: true, status: order.status });
-});
-
-app.get('/pay/status', (req, res) => {
-  const sid = req.query.sid;
-  const order = typeof sid === 'string' && db.orders[sid];
-  if (!order) return res.json({ paid: false, status: 'none', until: 0 });
-  const u = getUser(order.token);
-  res.json({
-    paid: Boolean(order.done),
-    status: order.done ? 'paid' : order.status,
-    until: order.done && u ? u.until : 0
-  });
-});
-
-const waiting = [];
-const isCompatible = (a, b) =>
-  a.id !== b.id && (!a.want || a.want === b.gender);
-
-function emitOnlineCount() {
-  io.emit('online', io.engine.clientsCount);
+  return order.done;
 }
+
+app.all('/qpay/callback', async (req, res) => {
+  try {
+    await settleOrder(req.query.sid);
+  } catch {}
+  res.status(200).send('SUCCESS');
+});
+
+app.get('/pay/status', async (req, res) => {
+  try {
+    const sid = req.query.sid;
+    const paid = await settleOrder(sid);
+    const order = db.orders[sid];
+    const until = paid && order && getUser(order.token) ? getUser(order.token).until : 0;
+    res.json({ paid, until });
+  } catch {
+    res.json({ paid: false, until: 0 });
+  }
+});
+
+// ---- Matchmaking & Real-time Chat ----
+const waiting = [];
+const activeTokens = new Map();
+
+const isBlocked = (a, b) => (getUser(a.token)?.blocked || []).includes(b.token);
+const isCompatible = (a, b) =>
+  a.token !== b.token &&
+  (!a.want || a.want === b.gender) &&
+  !isBlocked(a, b) &&
+  !isBlocked(b, a);
 
 function removeFromWaiting(s) {
   const idx = waiting.indexOf(s);
@@ -235,13 +298,9 @@ function leaveChat(s, notifySelf = false) {
 }
 
 io.on('connection', s => {
-  s.emit('online', io.engine.clientsCount);
-  emitOnlineCount();
-
   s.on('hello', ({ token, gender, adult } = {}, cb) => {
     if (typeof cb !== 'function') return;
     if (adult !== true) return cb({ err: 'Зөвхөн 18+ насны хүмүүс нэвтэрнэ.' });
-    if (!['m', 'f'].includes(gender)) return cb({ err: 'Эрэгтэй эсвэл Эмэгтэйг сонгоно уу.' });
 
     let userToken = typeof token === 'string' && getUser(token) ? token : null;
     if (!userToken) {
@@ -251,14 +310,28 @@ io.on('connection', s => {
     }
 
     const u = getUser(userToken);
-    if (isBanned(u)) return cb({ err: 'Таны хандалт түр эсвэл бүрмөсөн хаагдсан байна.' });
+    if (isBanned(u)) {
+      return cb({ err: 'Таны хандалт түр эсвэл бүрмөсөн хаагдсан байна.' });
+    }
+
+    const prevSocket = activeTokens.get(userToken);
+    if (prevSocket && prevSocket.id !== s.id) {
+      leaveChat(prevSocket);
+      prevSocket.emit('session_replaced');
+      prevSocket.disconnect(true);
+    }
+    activeTokens.set(userToken, s);
 
     s.token = userToken;
-    s.gender = gender;
+    s.gender = ['m', 'f'].includes(gender) ? gender : null;
     u.gender = s.gender;
     dirty = true;
 
-    cb({ token: userToken, premium: isPremium(userToken), until: u.until || 0 });
+    cb({
+      token: userToken,
+      premium: isPremium(userToken),
+      until: u.until || 0
+    });
   });
 
   s.on('find', want => {
@@ -268,10 +341,14 @@ io.on('connection', s => {
 
     leaveChat(s);
     const prem = isPremium(s.token);
-    if (['m', 'f'].includes(want) && !prem) return s.emit('need_premium');
+    if (['m', 'f'].includes(want) && !prem) {
+      return s.emit('need_premium');
+    }
 
     s.want = ['m', 'f'].includes(want) && prem ? want : null;
-    const idx = waiting.findIndex(other => other.token && isCompatible(s, other) && isCompatible(other, s));
+    s.waitSince = Date.now();
+
+    const idx = waiting.findIndex(other => isCompatible(s, other) && isCompatible(other, s));
     if (idx < 0) {
       waiting.push(s);
       return s.emit('waiting');
@@ -280,9 +357,8 @@ io.on('connection', s => {
     const partner = waiting.splice(idx, 1)[0];
     s.peer = partner;
     partner.peer = s;
-    const roomId = crypto.randomBytes(4).toString('hex');
-    s.emit('matched', { roomId });
-    partner.emit('matched', { roomId });
+    s.emit('matched');
+    partner.emit('matched');
   });
 
   s.on('cancel_find', () => {
@@ -296,9 +372,11 @@ io.on('connection', s => {
     if (!s.peer || typeof raw !== 'string') return;
     const text = raw.trim();
     if (!text) return;
+
     const now = Date.now();
     if (now - (s.lastMsg || 0) < 350) return;
     s.lastMsg = now;
+
     s.peer.emit('msg', text.slice(0, 500));
   });
 
@@ -306,28 +384,58 @@ io.on('connection', s => {
     if (s.peer) s.peer.emit('typing');
   });
 
+  s.on('block', () => {
+    if (!s.peer || !s.token) return;
+    const u = getUser(s.token);
+    if (u) {
+      u.blocked ||= [];
+      if (!u.blocked.includes(s.peer.token)) {
+        u.blocked.push(s.peer.token);
+        if (u.blocked.length > 500) u.blocked.shift();
+      }
+      dirty = true;
+    }
+    leaveChat(s, true);
+  });
+
   s.on('report', reason => {
     if (!s.peer || !s.token) return;
     const targetToken = s.peer.token;
     const target = getUser(targetToken);
     if (!target) return;
+
     const cleanReason = String(reason || 'Шалтгаан бичээгүй').trim().slice(0, 200);
     fs.appendFile(
       REPORTS_LOG,
-      JSON.stringify({ t: new Date().toISOString(), from: s.token, against: targetToken, reason: cleanReason }) + '\n',
+      JSON.stringify({
+        t: new Date().toISOString(),
+        from: s.token,
+        against: targetToken,
+        reason: cleanReason
+      }) + '\n',
       () => {}
     );
+
     target.reports = [...new Set([...(target.reports || []), s.token])];
-    if (target.reports.length >= 5) target.banned = true;
-    else if (target.reports.length >= 3) target.banUntil = Math.max(target.banUntil || 0, Date.now() + 24 * 3600000);
+    if (target.reports.length >= 5) {
+      target.banned = true;
+    } else if (target.reports.length >= 3) {
+      target.banUntil = Math.max(target.banUntil || 0, Date.now() + 24 * 3600000);
+    }
     dirty = true;
   });
 
   s.on('disconnect', () => {
     leaveChat(s);
-    emitOnlineCount();
+    if (s.token && activeTokens.get(s.token) === s) {
+      activeTokens.delete(s.token);
+    }
   });
 });
+
+setInterval(() => {
+  io.emit('online', io.engine.clientsCount);
+}, 5000);
 
 srv.listen(PORT, () => {
   console.log(`MindMatch сервер http://localhost:${PORT} дээр ажиллаж байна`);
