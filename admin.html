@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MindMatch — Админ самбар</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e232d;
+    --text: #eef2f7;
+    --muted: #9aa4b2;
+    --line: #2a303d;
+    --accent: #6c8cff;
+    --ok: #2ecc71;
+    --warn: #f39c12;
+    --err: #e74c3c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 20px;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  h1 { margin: 0 0 6px; font-size: 22px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  input, select, button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 14px;
+  }
+  input { min-width: 220px; flex: 1; }
+  button { cursor: pointer; font-weight: 600; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.ok { background: #1e6f43; border-color: #278a54; color: #fff; }
+  button.warn { background: #7a4b10; border-color: #9e6216; color: #fff; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td {
+    text-align: left;
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: middle;
+  }
+  th { color: var(--muted); font-weight: 600; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .b-paid { background: rgba(46,204,113,0.18); color: #6ee7a0; }
+  .b-sub { background: rgba(243,156,18,0.2); color: #fbd06b; }
+  .b-pend { background: rgba(154,164,178,0.18); color: #cbd5e1; }
+  .b-ban { background: rgba(231,76,60,0.2); color: #ff8a7d; }
+  .msg { margin-top: 10px; font-size: 13px; color: var(--muted); min-height: 18px; }
+  .err { color: #ff8a7d; }
+  .ok-txt { color: #6ee7a0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MindMatch Админ самбар</h1>
+  <div class="sub">Төлбөрийн захиалга баталгаажуулах, багц идэвхжүүлэх, гомдол/хориг удирдах</div>
+
+  <div class="card">
+    <div class="row">
+      <input id="adminKey" type="password" placeholder="ADMIN_KEY түлхүүрээ оруулна уу" />
+      <button id="btnLoad" class="primary" type="button">Нэвтрэх / Шинэчлэх</button>
+    </div>
+    <div id="statusMsg" class="msg"></div>
+  </div>
+
+  <div id="panel" style="display:none;">
+    <div class="tabs">
+      <button class="tab active" data-tab="orders" type="button">Захиалгууд</button>
+      <button class="tab" data-tab="reports" type="button">Гомдол / Хориг</button>
+      <button class="tab" data-tab="activate" type="button">Шууд багц идэвхжүүлэх</button>
+    </div>
+
+    <div id="tab-orders" class="card">
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Захиалга</th>
+              <th>Багц</th>
+              <th>Дүн</th>
+              <th>Данс / IBAN</th>
+              <th>Төлөв</th>
+              <th>Token</th>
+              <th>Үйлдэл</th>
+            </tr>
+          </thead>
+          <tbody id="ordersBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="tab-reports" class="card" style="display:none;">
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Token</th>
+              <th>Report тоо</th>
+              <th>Төлөв</th>
+              <th>Үйлдэл</th>
+            </tr>
+          </thead>
+          <tbody id="reportsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="tab-activate" class="card" style="display:none;">
+      <div class="row">
+        <input id="actToken" type="text" placeholder="Хэрэглэгчийн token" />
+        <select id="actPlan">
+          <option value="d1">1 өдөр (1,990₮)</option>
+          <option value="d3">3 өдөр (3,990₮)</option>
+          <option value="d7">7 өдөр (6,990₮)</option>
+          <option value="m1">1 сар (14,900₮)</option>
+          <option value="m3">3 сар (34,900₮)</option>
+          <option value="y1">1 жил (99,000₮)</option>
+        </select>
+        <button id="btnActivate" class="ok" type="button">Идэвхжүүлэх</button>
+      </div>
+      <div id="actMsg" class="msg"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const STORAGE_KEY = 'mm_admin_key_v1';
+let currentKey = sessionStorage.getItem(STORAGE_KEY) || '';
+if (currentKey) $('adminKey').value = currentKey;
+
+function getKey() {
+  return $('adminKey').value.trim();
+}
+
+async function api(path, method = 'GET', body = null) {
+  const key = getKey();
+  if (!key) throw new Error('ADMIN_KEY хоосон байна.');
+  sessionStorage.setItem(STORAGE_KEY, key);
+  const opts = {
+    method,
+    headers: { 'x-admin-key': key }
+  };
+  if (body) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  if (res.status === 403) throw new Error('ADMIN_KEY буруу байна (403).');
+  if (res.status === 503) throw new Error('Сервер дээр ADMIN_KEY тохируулаагүй байна (503).');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.err || 'Алдаа гарлаа (' + res.status + ')');
+  return data;
+}
+
+function statusBadge(o) {
+  if (o.done || o.status === 'paid') return '<span class="badge b-paid">Төлөгдсөн</span>';
+  if (o.status === 'submitted') return '<span class="badge b-sub">Шилжүүлсэн</span>';
+  return '<span class="badge b-pend">Хүлээгдэж буй</span>';
+}
+
+function fmtTime(ms) {
+  if (!ms) return '-';
+  return new Date(ms).toLocaleString('mn-MN');
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+async function loadAll() {
+  $('statusMsg').textContent = 'Ачааллаж байна...';
+  $('statusMsg').className = 'msg';
+  try {
+    const [ordersData, reportsData] = await Promise.all([
+      api('/admin/orders'),
+      api('/admin/reports')
+    ]);
+    $('panel').style.display = 'block';
+    $('statusMsg').textContent = 'Амжилттай холбогдлоо.';
+    $('statusMsg').className = 'msg ok-txt';
+    renderOrders(ordersData.orders || []);
+    renderReports(reportsData.users || []);
+  } catch (e) {
+    $('statusMsg').textContent = e.message;
+    $('statusMsg').className = 'msg err';
+  }
+}
+
+function renderOrders(list) {
+  const tb = $('ordersBody');
+  if (!list.length) {
+    tb.innerHTML = '<tr><td colspan="7" style="color:#9aa4b2;">Захиалга алга байна.</td></tr>';
+    return;
+  }
+  tb.innerHTML = list.map(o => `
+    <tr>
+      <td>
+        <div class="mono"><strong>${esc(o.sid)}</strong></div>
+        <div style="color:#9aa4b2;font-size:11px;">${esc(fmtTime(o.createdAt))}</div>
+      </td>
+      <td>${esc(o.label || o.plan)}</td>
+      <td>${Number(o.amount || 0).toLocaleString()}₮</td>
+      <td class="mono">${esc(o.iban || o.accountId || '-')}</td>
+      <td>${statusBadge(o)}</td>
+      <td class="mono">${esc(o.token)}</td>
+      <td>
+        ${o.done ? '<span style="color:#6ee7a0;font-size:12px;">Идэвхтэй</span>'
+          : `<button class="ok btn-approve" data-sid="${esc(o.sid)}" type="button">Батлах</button>`}
+      </td>
+    </tr>
+  `).join('');
+
+  tb.querySelectorAll('.btn-approve').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await api('/admin/approve', 'POST', { sid: btn.dataset.sid });
+        await loadAll();
+      } catch (e) {
+        alert(e.message);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+function renderReports(users) {
+  const tb = $('reportsBody');
+  if (!users.length) {
+    tb.innerHTML = '<tr><td colspan="4" style="color:#9aa4b2;">Гомдол эсвэл хоригтой хэрэглэгч алга байна.</td></tr>';
+    return;
+  }
+  tb.innerHTML = users.map(u => {
+    const tempBan = !u.banned && u.banUntil && u.banUntil > Date.now();
+    const state = u.banned
+      ? '<span class="badge b-ban">Бүрмөсөн хаагдсан</span>'
+      : tempBan
+        ? `<span class="badge b-sub">Түр хаагдсан (${esc(fmtTime(u.banUntil))})</span>`
+        : '<span class="badge b-pend">Report-той</span>';
+    return `
+      <tr>
+        <td class="mono">${esc(u.token)}</td>
+        <td>${Number(u.reportsCount || 0)}</td>
+        <td>${state}</td>
+        <td>
+          <button class="warn btn-unban" data-token="${esc(u.token)}" type="button">Хориг тайлах</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  tb.querySelectorAll('.btn-unban').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await api('/admin/unban', 'POST', { token: btn.dataset.token });
+        await loadAll();
+      } catch (e) {
+        alert(e.message);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const name = tab.dataset.tab;
+    $('tab-orders').style.display = name === 'orders' ? 'block' : 'none';
+    $('tab-reports').style.display = name === 'reports' ? 'block' : 'none';
+    $('tab-activate').style.display = name === 'activate' ? 'block' : 'none';
+  });
+});
+
+$('btnLoad').addEventListener('click', loadAll);
+$('btnActivate').addEventListener('click', async () => {
+  const token = $('actToken').value.trim();
+  const plan = $('actPlan').value;
+  $('actMsg').textContent = '';
+  try {
+    const r = await api('/admin/activate', 'POST', { token, plan });
+    $('actMsg').textContent = r.ok ? 'Багц амжилттай идэвхжлээ.' : 'Token эсвэл багц олдсонгүй.';
+    $('actMsg').className = r.ok ? 'msg ok-txt' : 'msg err';
+  } catch (e) {
+    $('actMsg').textContent = e.message;
+    $('actMsg').className = 'msg err';
+  }
+});
+
+if (currentKey) loadAll();
+</script>
+</body>
+</html>
