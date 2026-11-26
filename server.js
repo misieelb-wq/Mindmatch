@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { Server } = require('socket.io');
+const { Pool } = require('pg');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -29,7 +30,8 @@ const io = new Server(srv, {
 });
 
 const PORT = Number(process.env.PORT || 3000);
-const ADMIN_KEY = process.env.ADMIN_KEY || '';
+const ADMIN_KEY = (process.env.ADMIN_KEY || '').trim();
+const DATABASE_URL = (process.env.DATABASE_URL || '').trim();
 const DB_FILE = process.env.DB_PATH || path.join(__dirname, 'db.json');
 const DB_TMP = `${DB_FILE}.tmp`;
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(path.dirname(DB_FILE), 'backups');
@@ -38,6 +40,13 @@ const REPORTS_LOG = process.env.REPORTS_LOG_PATH || path.join(path.dirname(DB_FI
 if (!ADMIN_KEY || ADMIN_KEY.length < 12) {
   console.warn('[WARN] ADMIN_KEY тохируулаагүй эсвэл 12 тэмдэгтээс богино байна. Хүчтэй түлхүүр тавина уу.');
 }
+
+const pool = DATABASE_URL
+  ? new Pool({
+      connectionString: DATABASE_URL,
+      ssl: { rejectUnauthorized: false }
+    })
+  : null;
 
 const PLANS = {
   d1: { days: 1, price: 1990, label: '1 өдөр' },
@@ -60,6 +69,76 @@ try {
   }
 } catch (err) {
   console.error('[DB] db.json уншихад алдаа гарлаа:', err.message);
+}
+
+async function initPostgres() {
+  if (!pool) {
+    console.warn('[DB] DATABASE_URL тохируулаагүй тул локал db.json горимд ажиллаж байна.');
+    return;
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS mm_users (
+      token TEXT PRIMARY KEY,
+      data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at BIGINT NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS mm_orders (
+      sid TEXT PRIMARY KEY,
+      data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at BIGINT NOT NULL DEFAULT 0
+    );
+  `);
+
+  const usersRes = await pool.query('SELECT token, data FROM mm_users');
+  for (const row of usersRes.rows) {
+    if (row.token && row.data && typeof row.data === 'object') {
+      db.users[row.token] = row.data;
+    }
+  }
+
+  const ordersRes = await pool.query('SELECT sid, data FROM mm_orders');
+  for (const row of ordersRes.rows) {
+    if (row.sid && row.data && typeof row.data === 'object') {
+      db.orders[row.sid] = row.data;
+    }
+  }
+
+  console.log(`[DB] Supabase PostgreSQL холбогдлоо (users: ${Object.keys(db.users).length}, orders: ${Object.keys(db.orders).length})`);
+}
+
+async function persistUser(token) {
+  if (!token || !db.users[token]) return;
+  dirty = true;
+  if (!pool) return;
+  try {
+    await pool.query(
+      `INSERT INTO mm_users (token, data, updated_at)
+       VALUES ($1, $2::jsonb, $3)
+       ON CONFLICT (token) DO UPDATE
+       SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
+      [token, JSON.stringify(db.users[token]), Date.now()]
+    );
+  } catch (err) {
+    console.error('[DB] persistUser алдаа:', err.message);
+  }
+}
+
+async function persistOrder(sid) {
+  if (!sid || !db.orders[sid]) return;
+  dirty = true;
+  if (!pool) return;
+  try {
+    await pool.query(
+      `INSERT INTO mm_orders (sid, data, updated_at)
+       VALUES ($1, $2::jsonb, $3)
+       ON CONFLICT (sid) DO UPDATE
+       SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
+      [sid, JSON.stringify(db.orders[sid]), Date.now()]
+    );
+  } catch (err) {
+    console.error('[DB] persistOrder алдаа:', err.message);
+  }
 }
 
 let dirty = false;
@@ -152,7 +231,7 @@ function activatePlan(token, planKey, customDays = null) {
 
   const baseTime = Math.max(Date.now(), Number(u.until || 0));
   u.until = baseTime + days * 86400000;
-  dirty = true;
+  persistUser(token);
   return u.until;
 }
 
@@ -185,7 +264,7 @@ function checkAdmin(req, res, next) {
 
 app.get('/plans', (_, res) => res.json(PLANS));
 
-app.post('/pay/claim', (req, res) => {
+app.post('/pay/claim', async (req, res) => {
   const ip = req.ip || 'unknown';
   if (!allowRate(`claim:${ip}`, 12, 60 * 1000)) {
     return res.status(429).json({ err: 'Хэт олон хүсэлт илгээлээ. Түр хүлээнэ үү.' });
@@ -217,7 +296,7 @@ app.post('/pay/claim', (req, res) => {
     db.orders[sid].status = 'submitted';
     db.orders[sid].submittedAt = Date.now();
   }
-  dirty = true;
+  await persistOrder(sid);
   saveDbAtomic();
   res.json({ ok: true, sid, status: db.orders[sid].status });
 });
@@ -244,7 +323,7 @@ app.get('/admin/orders', checkAdmin, (req, res) => {
   res.json({ orders: list });
 });
 
-app.post('/admin/approve', checkAdmin, (req, res) => {
+app.post('/admin/approve', checkAdmin, async (req, res) => {
   const { sid, days } = req.body || {};
   const order = db.orders[sid];
   if (!order) return res.status(404).json({ err: 'Захиалга олдсонгүй.' });
@@ -258,14 +337,18 @@ app.post('/admin/approve', checkAdmin, (req, res) => {
   order.done = true;
   order.status = 'approved';
   order.approvedAt = Date.now();
-  dirty = true;
+  await persistUser(order.token);
+  await persistOrder(sid);
   saveDbSync();
   res.json({ ok: true, sid, until });
 });
 
-app.post('/admin/activate', checkAdmin, (req, res) => {
+app.post('/admin/activate', checkAdmin, async (req, res) => {
   const { token, plan, days } = req.body || {};
   const until = activatePlan(token, plan, days !== undefined ? Number(days) : null);
+  if (until && token) {
+    await persistUser(token);
+  }
   res.json({ ok: Boolean(until), until: until || 0 });
 });
 
@@ -281,13 +364,14 @@ app.get('/admin/reports', checkAdmin, (req, res) => {
   res.json({ total: flagged.length, users: flagged });
 });
 
-app.post('/admin/unban', checkAdmin, (req, res) => {
-  const u = getUser(req.body && req.body.token);
+app.post('/admin/unban', checkAdmin, async (req, res) => {
+  const token = req.body && req.body.token;
+  const u = getUser(token);
   if (!u) return res.sendStatus(404);
   u.banned = false;
   u.banUntil = 0;
   u.reports = [];
-  dirty = true;
+  await persistUser(token);
   res.json({ ok: true });
 });
 
@@ -318,7 +402,7 @@ function leaveChat(s, notifySelf = false) {
 }
 
 io.on('connection', s => {
-  s.on('hello', ({ token, gender, adult } = {}, cb) => {
+  s.on('hello', async ({ token, gender, adult } = {}, cb) => {
     if (typeof cb !== 'function') return;
     if (adult !== true) return cb({ err: 'Зөвхөн 18+ насны хүмүүс нэвтэрнэ.' });
 
@@ -345,7 +429,7 @@ io.on('connection', s => {
     s.token = userToken;
     s.gender = ['m', 'f'].includes(gender) ? gender : null;
     u.gender = s.gender;
-    dirty = true;
+    await persistUser(userToken);
 
     const prem = isPremium(userToken);
     cb({
@@ -366,7 +450,6 @@ io.on('connection', s => {
       return s.emit('need_premium');
     }
 
-    // Хугацаа дууссан бол автоматаар санамсаргүй хайлт (null) болно
     s.want = ['m', 'f'].includes(want) && prem ? want : null;
     s.waitSince = Date.now();
 
@@ -407,7 +490,7 @@ io.on('connection', s => {
     if (s.peer) s.peer.emit('typing');
   });
 
-  s.on('block', () => {
+  s.on('block', async () => {
     if (!s.peer || !s.token) return;
     const u = getUser(s.token);
     if (u) {
@@ -416,12 +499,12 @@ io.on('connection', s => {
         u.blocked.push(s.peer.token);
         if (u.blocked.length > 500) u.blocked.shift();
       }
-      dirty = true;
+      await persistUser(s.token);
     }
     leaveChat(s, true);
   });
 
-  s.on('report', reason => {
+  s.on('report', async reason => {
     if (!s.peer || !s.token) return;
     const targetToken = s.peer.token;
     const target = getUser(targetToken);
@@ -445,7 +528,7 @@ io.on('connection', s => {
     } else if (target.reports.length >= 3) {
       target.banUntil = Math.max(target.banUntil || 0, Date.now() + 24 * 3600000);
     }
-    dirty = true;
+    await persistUser(targetToken);
   });
 
   s.on('disconnect', () => {
@@ -460,6 +543,16 @@ setInterval(() => {
   io.emit('online', io.engine.clientsCount);
 }, 5000);
 
-srv.listen(PORT, () => {
-  console.log(`MindMatch сервер http://localhost:${PORT} дээр ажиллаж байна`);
-});
+async function startServer() {
+  try {
+    await initPostgres();
+  } catch (err) {
+    console.error('[DB] PostgreSQL эхлүүлэхэд алдаа гарлаа:', err.message);
+  }
+
+  srv.listen(PORT, () => {
+    console.log(`MindMatch сервер http://localhost:${PORT} дээр ажиллаж байна`);
+  });
+}
+
+startServer();
