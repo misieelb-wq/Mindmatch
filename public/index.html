@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="mn" translate="no">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="google" content="notranslate">
+  <title>MindMatch</title>
+  <style>
+    :root {
+      --bg: #171514;
+      --card: rgba(33, 30, 28, 0.88);
+      --soft: rgba(50, 45, 42, 0.85);
+      --line: rgba(238, 224, 206, 0.14);
+      --accent: #D69D5E;
+      --accent-hover: #C48949;
+      --text: #F4EFE7;
+      --sub: #ACA195;
+      --danger-bg: rgba(196, 76, 62, 0.18);
+      --danger-text: #F29B90;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+    }
+    #app {
+      width: 100%;
+      max-width: 500px;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      padding: 14px;
+    }
+    button, select, input {
+      font: inherit;
+      padding: 10px 13px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--text);
+    }
+    button {
+      background: var(--accent);
+      color: #1A1511;
+      border-color: transparent;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover:not(:disabled) { background: var(--accent-hover); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button.s { background: var(--soft); color: var(--text); border-color: var(--line); font-weight: 500; }
+    button.d { background: var(--danger-bg); color: var(--danger-text); border-color: rgba(242, 155, 144, 0.24); }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .hide { display: none !important; }
+    #gate {
+      margin: auto 0;
+      background: var(--card);
+      border: 1px solid var(--line);
+      padding: 24px;
+      border-radius: 16px;
+    }
+    #gate h2 { margin: 0 0 6px; font-size: 24px; letter-spacing: 0.04em; text-transform: uppercase; }
+    .field { margin: 14px 0; }
+    .field label.block-label { display: block; margin-bottom: 6px; font-size: 13px; color: var(--sub); }
+    .field select { width: 100%; }
+    #main { flex: 1; display: flex; flex-direction: column; min-height: 0; gap: 8px; }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--card);
+      border: 1px solid var(--line);
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+    }
+    .room-badge { font-size: 12px; color: var(--sub); padding: 0 2px; }
+    #log {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+    .m { padding: 10px 14px; border-radius: 12px; max-width: 82%; word-break: break-word; line-height: 1.45; }
+    .me { background: var(--accent); color: #1A1511; align-self: flex-end; font-weight: 500; }
+    .th { background: var(--soft); color: var(--text); align-self: flex-start; border: 1px solid var(--line); }
+    .sys { color: var(--sub); align-self: center; font-size: 13px; text-align: center; }
+    #typing { color: var(--sub); font-size: 12px; min-height: 16px; padding-left: 4px; }
+    #txt { flex: 1; }
+    #plist {
+      position: fixed;
+      inset: 0;
+      background: rgba(14, 12, 11, 0.75);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 20;
+    }
+    .plist-card {
+      width: 100%;
+      max-width: 440px;
+      max-height: 88dvh;
+      overflow-y: auto;
+      background: #211E1C;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 20px;
+    }
+    .plan-btn { width: 100%; margin: 5px 0; display: flex; justify-content: space-between; align-items: center; }
+    .bank-box {
+      margin-top: 14px;
+      background: var(--soft);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 13px;
+    }
+    .copy-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+      background: rgba(23, 21, 20, 0.65);
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+    .copy-btn { padding: 6px 10px; font-size: 12px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="gate">
+      <h2>MindMatch</h2>
+      <p style="margin:0 0 14px;color:var(--sub);font-size:14px">Бүртгэлгүй, аноним 1:1 чат.</p>
+      <div class="field">
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:14px;cursor:pointer">
+          <input type="checkbox" id="adult" style="margin-top:3px">
+          <span>Би 18 ба түүнээс дээш настай, <a href="/terms.html" target="_blank" style="color:var(--accent)">үйлчилгээний нөхцөлийг</a> зөвшөөрч байна.</span>
+        </label>
+      </div>
+      <div class="field">
+        <label class="block-label" for="g">Таны хүйс</label>
+        <select id="g">
+          <option value="m">Эрэгтэй</option>
+          <option value="f">Эмэгтэй</option>
+        </select>
+      </div>
+      <button id="go" type="button" style="width:100%;margin-top:6px">Орох</button>
+      <p id="err" style="color:var(--danger-text);margin:10px 0 0;font-size:14px"></p>
+    </div>
+
+    <div id="main" class="hide">
+      <div class="topbar">
+        <strong style="letter-spacing:0.03em">MindMatch</strong>
+        <span id="online" style="color:var(--sub);font-size:13px">Онлайн: 1</span>
+      </div>
+
+      <div class="room-badge hide" id="roomBadge"></div>
+
+      <div class="row">
+        <select id="want" style="flex:1">
+          <option value="">Санамсаргүй</option>
+          <option value="f">Эмэгтэй</option>
+          <option value="m">Эрэгтэй</option>
+        </select>
+        <button id="find" type="button">Хайх</button>
+        <button class="s hide" id="cancel" type="button">Болих</button>
+      </div>
+
+      <div id="log"><div class="sys">«Хайх» дарж шинэ ярилцагч олно уу.</div></div>
+      <div id="typing"></div>
+
+      <div class="row hide" id="tools">
+        <button class="s" id="next" type="button" style="flex:1">Дараагийн</button>
+        <button class="s" id="leave" type="button">Гарах</button>
+        <button class="d" id="report" type="button">Report</button>
+      </div>
+
+      <div class="row">
+        <input id="txt" maxlength="500" placeholder="Мессеж бичих..." disabled>
+        <button id="send" type="button" disabled>Илгээх</button>
+      </div>
+    </div>
+
+    <div id="plist" class="hide">
+      <div class="plist-card" id="plistCard"></div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const $ = id => document.getElementById(id), s = io();
+    const BANK = {
+      iban: 'MN58000500 5325110588',
+      holder: 'Б. Мишээл'
+    };
+    let premium = false, premUntil = 0, typingTimer = null, payPoll = null, plansData = null;
+
+    const hasActivePremium = () => Boolean(premium && Number(premUntil || 0) > Date.now());
+
+    const syncExpiredState = () => {
+      if (premium && Number(premUntil || 0) <= Date.now()) {
+        premium = false;
+        premUntil = 0;
+        if (['m', 'f'].includes($('want').value)) {
+          $('want').value = '';
+          addMsg('Эрхийн хугацаа дууссан тул санамсаргүй хайлт руу шилжлээ.', 'sys');
+        }
+      }
+    };
+
+    const addMsg = (t, c) => {
+      const d = document.createElement('div');
+      d.className = 'm ' + c;
+      d.textContent = t;
+      $('log').append(d);
+      $('log').scrollTop = $('log').scrollHeight;
+    };
+
+    const setRoomBadge = rid => {
+      const el = $('roomBadge');
+      if (rid) {
+        el.textContent = `Room ID: ${rid}`;
+        el.classList.remove('hide');
+      } else {
+        el.textContent = '';
+        el.classList.add('hide');
+      }
+    };
+
+    const setChat = a => {
+      $('txt').disabled = $('send').disabled = !a;
+      $('tools').classList.toggle('hide', !a);
+      if (a) $('txt').focus();
+      else setRoomBadge('');
+    };
+
+    const setSearch = a => {
+      $('find').classList.toggle('hide', a);
+      $('cancel').classList.toggle('hide', !a);
+      $('want').disabled = a;
+    };
+
+    const copyText = async (val, btn) => {
+      try { await navigator.clipboard.writeText(val); } catch {}
+      const prev = btn.textContent;
+      btn.textContent = 'Хуулсан';
+      setTimeout(() => { btn.textContent = prev; }, 1200);
+    };
+
+    const closePlans = () => {
+      if (payPoll) { clearInterval(payPoll); payPoll = null; }
+      $('plist').classList.add('hide');
+      $('plistCard').innerHTML = '';
+    };
+
+    const openPlans = async () => {
+      if (!plansData) {
+        const r = await fetch('/plans');
+        plansData = await r.json();
+      }
+      const order = ['d1', 'd3', 'd5', 'd7', 'm1', 'm3', 'y1'];
+      $('plist').classList.remove('hide');
+      $('plistCard').innerHTML = `
+        <h3 style="margin:0 0 6px">Хүйс сонгох эрх</h3>
+        <p style="margin:0 0 12px;color:var(--sub);font-size:13px">Багц сонгоод IBAN данс руу шилжүүлнэ үү.</p>
+        ${order.filter(k => plansData[k]).map(k => `
+          <button type="button" class="s plan-btn" data-k="${k}">
+            <span>${plansData[k].label}</span>
+            <strong>${Number(plansData[k].price).toLocaleString()}₮</strong>
+          </button>
+        `).join('')}
+        <button type="button" id="closePlist" style="width:100%;margin-top:10px">Хаах</button>
+        <div id="payBox"></div>
+      `;
+      $('closePlist').onclick = closePlans;
+
+      $('plistCard').querySelectorAll('.plan-btn').forEach(btn => {
+        btn.onclick = async () => {
+          const planKey = btn.dataset.k;
+          const p = plansData[planKey];
+          const refCode = 'MM' + Math.floor(100000 + Math.random() * 900000);
+          $('payBox').innerHTML = `
+            <div class="bank-box">
+              <div><strong>Дүн:</strong> ${Number(p.price).toLocaleString()}₮ (${p.label})</div>
+              <div><strong>Хүлээн авагч:</strong> ${BANK.holder}</div>
+              <div class="copy-row">
+                <span><strong>IBAN:</strong> ${BANK.iban}</span>
+                <button type="button" class="copy-btn" id="cpIban">Хуулах</button>
+              </div>
+              <div class="copy-row">
+                <span><strong>Гүйлгээний утга:</strong> ${refCode}</span>
+                <button type="button" class="copy-btn" id="cpCode">Хуулах</button>
+              </div>
+              <button type="button" id="sentBtn" style="width:100%;margin-top:10px">Төлбөр шилжүүлсэн</button>
+              <p id="payMsg" style="margin:8px 0 0;color:var(--sub);font-size:12px"></p>
+            </div>
+          `;
+          $('cpIban').onclick = e => copyText(BANK.iban, e.target);
+          $('cpCode').onclick = e => copyText(refCode, e.target);
+          $('sentBtn').onclick = async () => {
+            const res = await fetch('/pay/claim', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: localStorage.tk, plan: planKey, refCode })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+              $('payMsg').style.color = 'var(--danger-text)';
+              $('payMsg').textContent = data.err || 'Алдаа гарлаа';
+              return;
+            }
+            $('payMsg').style.color = 'var(--sub)';
+            $('payMsg').textContent = 'Мэдэгдэл админ руу илгээгдлээ. Баталгаажмагц эрх нээгдэнэ.';
+            if (payPoll) clearInterval(payPoll);
+            payPoll = setInterval(async () => {
+              const st = await (await fetch('/pay/status?sid=' + encodeURIComponent(data.sid))).json();
+              if (st.paid) {
+                clearInterval(payPoll);
+                premium = true;
+                premUntil = st.until || (Date.now() + 86400000);
+                $('payMsg').innerHTML = '<span style="color:#7CD992;font-weight:600">Төлбөр баталгаажлаа!</span>';
+              }
+            }, 3000);
+          };
+        };
+      });
+    };
+
+    $('go').onclick = () => s.emit('hello', {
+      token: localStorage.tk,
+      gender: $('g').value,
+      adult: $('adult').checked
+    }, r => {
+      if (!r || r.err) return $('err').textContent = (r && r.err) || 'Алдаа гарлаа';
+      localStorage.tk = r.token;
+      premium = Boolean(r.premium);
+      premUntil = r.until || 0;
+      syncExpiredState();
+      $('gate').classList.add('hide');
+      $('main').classList.remove('hide');
+    });
+
+    const find = () => {
+      syncExpiredState();
+      const want = $('want').value;
+      if (want && !hasActivePremium()) return openPlans();
+      setRoomBadge('');
+      $('log').innerHTML = '';
+      setChat(false);
+      setSearch(true);
+      s.emit('find', want);
+    };
+
+    $('find').onclick = find;
+    $('next').onclick = find;
+    $('cancel').onclick = () => s.emit('cancel_find');
+    $('leave').onclick = () => s.emit('leave');
+
+    s.on('waiting', () => addMsg('Хүн хайж байна...', 'sys'));
+    s.on('search_cancelled', () => { setSearch(false); addMsg('Хайлт зогслоо.', 'sys'); });
+    s.on('matched', info => {
+      setSearch(false);
+      setRoomBadge(info && info.roomId ? info.roomId : '');
+      $('log').innerHTML = '';
+      addMsg('Холбогдлоо', 'sys');
+      setChat(true);
+    });
+    s.on('left_chat', () => { setSearch(false); setChat(false); addMsg('Та гарлаа.', 'sys'); });
+    s.on('partner_left', () => { setSearch(false); setChat(false); addMsg('Харилцагч гарлаа.', 'sys'); });
+    s.on('need_premium', () => {
+      setSearch(false);
+      premium = false;
+      premUntil = 0;
+      $('want').value = '';
+      openPlans();
+    });
+    s.on('err_msg', m => { setSearch(false); addMsg(m, 'sys'); });
+    s.on('msg', m => { $('typing').textContent = ''; addMsg(m, 'th'); });
+    s.on('typing', () => {
+      $('typing').textContent = 'Бичиж байна...';
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => { $('typing').textContent = ''; }, 1400);
+    });
+    s.on('online', n => { $('online').textContent = 'Онлайн: ' + n; });
+
+    const sendMsg = () => {
+      const v = $('txt').value.trim();
+      if (!v) return;
+      s.emit('msg', v);
+      addMsg(v, 'me');
+      $('txt').value = '';
+    };
+
+    $('send').onclick = sendMsg;
+    $('txt').onkeydown = e => {
+      if (e.key === 'Enter') return sendMsg();
+      s.emit('typing');
+    };
+    $('report').onclick = () => {
+      const reason = prompt('Report шалтгаан:');
+      if (reason !== null) {
+        s.emit('report', reason);
+        addMsg('Report илгээгдлээ.', 'sys');
+      }
+    };
+  </script>
+</body>
+</html>

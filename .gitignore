@@ -1,0 +1,6 @@
+node_modules/
+db.json
+db.json.tmp
+backups/
+reports.log
+.env

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="mn">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MindMatch Админ</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background:#171514; color:#F4EFE7; margin:0; padding:24px; }
+    .wrap { max-width:860px; margin:0 auto; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    input, button { padding:10px 12px; border-radius:10px; border:1px solid rgba(238,224,206,0.16); background:#211E1C; color:#F4EFE7; }
+    button { background:#D69D5E; color:#1A1511; font-weight:600; border:none; cursor:pointer; }
+    .order { display:flex; justify-content:space-between; align-items:center; gap:12px; background:#211E1C; border:1px solid rgba(238,224,206,0.14); padding:12px 14px; border-radius:12px; margin-top:10px; }
+    .sub { color:#ACA195; font-size:13px; margin-top:4px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>MindMatch — Төлбөр баталгаажуулах</h2>
+    <div class="row">
+      <input id="keyInput" type="password" placeholder="ADMIN_KEY оруулна уу">
+      <button id="load" type="button">Жагсаалт татах</button>
+    </div>
+    <div id="list"></div>
+  </div>
+  <script>
+    const keyEl = document.getElementById('keyInput');
+    keyEl.value = sessionStorage.getItem('mm_admin_key') || '';
+    const defaultDays = { d1:1, d3:3, d5:5, d7:7, m1:30, m3:90, y1:365 };
+
+    async function loadOrders() {
+      const k = keyEl.value.trim();
+      if (!k) return;
+      sessionStorage.setItem('mm_admin_key', k);
+      const res = await fetch('/admin/orders', { headers: { 'x-admin-key': k } });
+      if (!res.ok) {
+        document.getElementById('list').innerHTML = '<p class="sub">Түлхүүр буруу эсвэл хандалт татгалзлаа.</p>';
+        return;
+      }
+      const { orders } = await res.json();
+      document.getElementById('list').innerHTML = orders.length ? orders.map(o => {
+        const dVal = defaultDays[o.plan] || o.days || 1;
+        const leftDays = o.userUntil > Date.now() ? Math.ceil((o.userUntil - Date.now()) / 86400000) : 0;
+        return `
+          <div class="order">
+            <div>
+              <div><strong>${o.sid}</strong> — ${Number(o.amount || 0).toLocaleString()}₮ (${o.label || o.plan})</div>
+              <div class="sub">Төлөв: ${o.status || (o.done ? 'approved' : 'pending')} | Үлдсэн хугацаа: ${leftDays} хоног</div>
+            </div>
+            <div class="row">
+              <input id="d_${o.sid}" type="number" min="1" max="365" value="${dVal}" style="width:74px">
+              <button type="button" onclick="approve('${o.sid}')">Батлах</button>
+            </div>
+          </div>
+        `;
+      }).join('') : '<p class="sub">Захиалга алга.</p>';
+    }
+
+    async function approve(sid) {
+      const days = Number(document.getElementById('d_' + sid).value);
+      const res = await fetch('/admin/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': keyEl.value.trim() },
+        body: JSON.stringify({ sid, days })
+      });
+      if (res.ok) loadOrders();
+    }
+
+    document.getElementById('load').onclick = loadOrders;
+  </script>
+</body>
+</html>
